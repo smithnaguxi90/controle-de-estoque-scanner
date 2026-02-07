@@ -985,22 +985,24 @@
             });
           }
 
-          const constraints = {
-            facingMode: "environment",
-            width: { min: 640, ideal: 1280, max: 1920 },
-            height: { min: 480, ideal: 720, max: 1080 },
-          };
+          // FIX: O primeiro argumento deve ter APENAS UMA chave (deviceId ou facingMode)
+          const cameraIdOrConfig = { facingMode: "environment" };
 
           const config = {
             fps: 25,
             qrbox: { width: 280, height: 100 },
             aspectRatio: 1.0,
             disableFlip: false,
+            // Adicionando constraints aqui para tentar forçar HD, se suportado pelo navegador
+            videoConstraints: {
+              width: { min: 640, ideal: 1280, max: 1920 },
+              height: { min: 480, ideal: 720, max: 1080 },
+            },
           };
 
           this.html5QrcodeScanner
             .start(
-              constraints,
+              cameraIdOrConfig,
               config,
               (decodedText) => {
                 this.stopCamera();
