@@ -950,33 +950,69 @@
           modal.classList.remove("hidden");
           modal.classList.add("flex");
 
+          // Inicializa apenas se não existir
           if (!this.html5QrcodeScanner) {
-            this.html5QrcodeScanner = new Html5Qrcode("reader");
+            // Configuração CRÍTICA: Definir formatos de código de barras suportados
+            // Sem isso, ele pode ignorar códigos de produtos comuns (EAN-13)
+            const formatsToSupport = [
+              Html5QrcodeSupportedFormats.QR_CODE,
+              Html5QrcodeSupportedFormats.EAN_13, // Padrão Brasil/Europa
+              Html5QrcodeSupportedFormats.EAN_8,
+              Html5QrcodeSupportedFormats.CODE_128, // Logística
+              Html5QrcodeSupportedFormats.CODE_39,
+              Html5QrcodeSupportedFormats.UPC_A, // Padrão EUA
+              Html5QrcodeSupportedFormats.UPC_E,
+              Html5QrcodeSupportedFormats.CODABAR,
+              Html5QrcodeSupportedFormats.ITF,
+            ];
+
+            // verbose: false para limpar o console
+            this.html5QrcodeScanner = new Html5Qrcode("reader", {
+              formatsToSupport: formatsToSupport,
+              verbose: false,
+            });
           }
 
-          const config = { fps: 10, qrbox: { width: 250, height: 250 } };
+          // Configuração de escaneamento
+          const config = {
+            fps: 15, // Aumentado para 15 para leitura mais fluida
+            qrbox: { width: 280, height: 180 }, // Retangular é melhor para códigos de barras longos
+            aspectRatio: 1.0,
+            disableFlip: false, // Importante para algumas câmeras frontais/traseiras
+          };
 
           this.html5QrcodeScanner
             .start(
-              { facingMode: "environment" },
+              { facingMode: "environment" }, // Tenta usar câmera traseira
               config,
               (decodedText) => {
+                // Sucesso na leitura
                 this.stopCamera();
+
+                // Toca um som de "bip" para feedback
+                this.playBeep();
+
                 if (this.cameraTargetInput) {
                   this.cameraTargetInput.value = decodedText;
 
                   // Se for o scanner principal, submete automaticamente
                   if (this.cameraTargetInput.id === "scannerInput") {
                     this.handleScanSubmit({ preventDefault: () => {} });
+                  } else {
+                    // Se for no modal, apenas foca no próximo campo
+                    document.getElementById("new-name")?.focus();
                   }
                 }
               },
               (errorMessage) => {
-                // ignorar erros de leitura contínua
+                // Ignora erros de frame vazio para não spamar
               },
             )
             .catch((err) => {
-              alert("Erro ao iniciar câmera: " + err);
+              console.error(err);
+              alert(
+                "Erro ao acessar câmera. Verifique se deu permissão e se está usando HTTPS.",
+              );
               this.stopCamera();
             });
         }
@@ -990,9 +1026,35 @@
             this.html5QrcodeScanner
               .stop()
               .then(() => {
-                // Câmera parada
+                // Limpeza interna se necessário
               })
-              .catch((err) => console.log(err));
+              .catch((err) => console.log("Erro ao parar câmera:", err));
+          }
+        }
+
+        // Função auxiliar de som
+        playBeep() {
+          // Tenta criar um contexto de áudio simples para um bip
+          try {
+            const AudioContext =
+              window.AudioContext || window.webkitAudioContext;
+            if (AudioContext) {
+              const ctx = new AudioContext();
+              const osc = ctx.createOscillator();
+              const gain = ctx.createGain();
+
+              osc.connect(gain);
+              gain.connect(ctx.destination);
+
+              osc.type = "sine";
+              osc.frequency.value = 880; // Frequência A5
+              gain.gain.value = 0.1;
+
+              osc.start();
+              setTimeout(() => osc.stop(), 100);
+            }
+          } catch (e) {
+            console.error("Audio beep falhou", e);
           }
         }
 
