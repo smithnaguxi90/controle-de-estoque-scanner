@@ -9,6 +9,11 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/lucide@latest"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- Biblioteca de Leitura de QR/Barcode via Câmera -->
+    <script
+      src="https://unpkg.com/html5-qrcode"
+      type="text/javascript"
+    ></script>
 
     <!-- Configuração Tailwind -->
     <script>
@@ -88,6 +93,15 @@
         background: rgba(255, 255, 255, 0.95);
         backdrop-filter: blur(10px);
         border: 1px solid rgba(226, 232, 240, 0.8);
+      }
+
+      /* Estilos específicos para o leitor de câmera */
+      #reader__scan_region {
+        background: white;
+      }
+      #reader video {
+        object-fit: cover;
+        border-radius: 12px;
       }
     </style>
   </head>
@@ -227,6 +241,50 @@
       class="fixed top-4 right-4 z-50 flex flex-col gap-2 pointer-events-none"
     ></div>
 
+    <!-- Modal Câmera -->
+    <div
+      id="modal-camera"
+      class="hidden fixed inset-0 z-[60] bg-black/90 backdrop-blur-sm items-center justify-center p-4 transition-opacity duration-300"
+    >
+      <div
+        class="bg-white rounded-2xl w-full max-w-md shadow-2xl overflow-hidden flex flex-col max-h-[90vh]"
+      >
+        <div
+          class="p-4 bg-slate-900 text-white flex justify-between items-center"
+        >
+          <h3 class="font-bold flex items-center gap-2">
+            <i data-lucide="camera" class="w-5 h-5"></i>
+            Escanear Código
+          </h3>
+          <button
+            onclick="app.stopCamera()"
+            class="p-1 hover:bg-slate-700 rounded-full"
+          >
+            <i data-lucide="x" class="w-6 h-6"></i>
+          </button>
+        </div>
+        <div
+          class="p-4 bg-black flex-1 flex items-center justify-center relative overflow-hidden"
+        >
+          <div id="reader" class="w-full h-full"></div>
+          <!-- Overlay de mira -->
+          <div
+            class="absolute inset-0 pointer-events-none border-2 border-primary/50 opacity-50 rounded-lg m-12"
+          ></div>
+          <div
+            class="absolute inset-0 pointer-events-none flex items-center justify-center"
+          >
+            <div
+              class="w-64 h-1 bg-red-500/50 shadow-[0_0_10px_rgba(239,68,68,0.8)]"
+            ></div>
+          </div>
+        </div>
+        <div class="p-4 bg-slate-50 text-center text-xs text-slate-500">
+          Aponte a câmera para um código de barras ou QR Code.
+        </div>
+      </div>
+    </div>
+
     <!-- Modal Produto (Novo / Editar) -->
     <div
       id="modal-add"
@@ -264,6 +322,14 @@
                   class="flex-1 px-4 py-2.5 border border-slate-200 rounded-lg focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none font-mono text-sm bg-slate-50 transition-all"
                   placeholder="Escaneie ou digite..."
                 />
+                <button
+                  type="button"
+                  onclick="app.openCameraForInput()"
+                  class="bg-slate-100 px-3 rounded-lg text-slate-600 hover:bg-slate-200 hover:text-slate-900 transition-colors"
+                  title="Ler com Câmera"
+                >
+                  <i data-lucide="camera" class="w-5 h-5"></i>
+                </button>
                 <button
                   type="button"
                   onclick="app.generateRandomBarcode()"
@@ -364,10 +430,6 @@
 
     <!-- Lógica da Aplicação -->
     <script>
-      /**
-       * Classe principal do Sistema
-       * Encapsula lógica, estado e manipulação de DOM
-       */
       class StockSystem {
         constructor() {
           // Estado Padrão
@@ -411,7 +473,9 @@
           this.scanMode = "in";
           this.searchTerm = "";
           this.chartInstance = null;
-          this.editingId = null; // ID do produto sendo editado
+          this.editingId = null;
+          this.html5QrcodeScanner = null;
+          this.cameraTargetInput = null; // Para saber onde preencher o código lido (scanner principal ou modal de cadastro)
 
           // Bindings
           this.handleScanSubmit = this.handleScanSubmit.bind(this);
@@ -458,7 +522,6 @@
           this.render();
           lucide.createIcons();
 
-          // Atalhos de Teclado Global
           document.addEventListener("keydown", (e) => {
             if (this.activeTab === "scanner") {
               if (e.key === "F5") {
@@ -489,11 +552,8 @@
           }
         }
 
-        // --- Navegação e Roteamento ---
         navigate(tab) {
           this.activeTab = tab;
-
-          // Atualizar UI da Sidebar
           document.querySelectorAll(".nav-item").forEach((el) => {
             const isActive = el.id === `nav-${tab}`;
             el.className = `nav-item group flex items-center gap-3 p-3 md:px-4 md:py-3.5 rounded-xl transition-all ${isActive ? "bg-primary text-white shadow-lg shadow-primary/30" : "hover:bg-slate-50 text-slate-600"}`;
@@ -507,7 +567,6 @@
               span.className = `font-medium hidden md:block ${isActive ? "text-white" : "text-slate-600 group-hover:text-slate-900"}`;
           });
 
-          // Títulos
           const titles = {
             dashboard: "Visão Geral",
             scanner: "Central de Leitura",
@@ -518,11 +577,8 @@
           this.render();
         }
 
-        // --- Renderização Principal ---
         render() {
           const container = document.getElementById("app-content");
-
-          // Fade Out/In Effect
           container.style.opacity = "0";
           container.style.transform = "translateY(10px)";
 
@@ -536,7 +592,6 @@
 
             lucide.createIcons();
 
-            // Animate In
             requestAnimationFrame(() => {
               container.style.transition = "all 0.3s ease-out";
               container.style.opacity = "1";
@@ -545,7 +600,7 @@
           }, 150);
         }
 
-        // --- Módulo: Dashboard ---
+        // --- Dashboard ---
         renderDashboard(container) {
           const totalStock = this.inventory.reduce(
             (acc, item) => acc + item.quantity,
@@ -561,7 +616,6 @@
 
           container.innerHTML = `
                     <div class="space-y-6">
-                        <!-- Stats Grid -->
                         <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6">
                             ${this.createStatCard("Total de Itens", this.inventory.length, "boxes", "text-blue-600", "bg-blue-50", false, "app.navigate('inventory')")}
                             ${this.createStatCard("Estoque Físico", totalStock, "layers", "text-emerald-600", "bg-emerald-50", false, "app.navigate('inventory')")}
@@ -570,15 +624,12 @@
                         </div>
 
                         <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                            <!-- Gráfico -->
                             <div class="lg:col-span-2 bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
                                 <h3 class="text-lg font-bold text-slate-800 mb-6">Distribuição por Categoria</h3>
                                 <div class="h-64 w-full">
                                     <canvas id="stockChart"></canvas>
                                 </div>
                             </div>
-
-                            <!-- Alertas / Logs Rápidos -->
                             <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 flex flex-col">
                                 <h3 class="text-lg font-bold text-slate-800 mb-4">Alertas de Estoque</h3>
                                 <div class="flex-1 overflow-y-auto custom-scroll pr-2 max-h-[300px]">
@@ -606,8 +657,6 @@
                                 </div>
                             </div>
                         </div>
-
-                        <!-- Histórico Recente -->
                         <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
                             <h3 class="text-lg font-bold text-slate-800 mb-4">Últimas Movimentações</h3>
                             <div class="overflow-x-auto">
@@ -657,8 +706,6 @@
                         </div>
                     </div>
                 `;
-
-          // Render Chart
           setTimeout(() => this.initChart(), 50);
         }
 
@@ -695,16 +742,12 @@
         initChart() {
           const ctx = document.getElementById("stockChart");
           if (!ctx) return;
-
-          // Agregar dados por categoria
           const categories = {};
           this.inventory.forEach((item) => {
             categories[item.category] =
               (categories[item.category] || 0) + item.quantity;
           });
-
           if (this.chartInstance) this.chartInstance.destroy();
-
           this.chartInstance = new Chart(ctx, {
             type: "bar",
             data: {
@@ -722,9 +765,7 @@
             options: {
               responsive: true,
               maintainAspectRatio: false,
-              plugins: {
-                legend: { display: false },
-              },
+              plugins: { legend: { display: false } },
               scales: {
                 y: { beginAtZero: true, grid: { color: "#f1f5f9" } },
                 x: { grid: { display: false } },
@@ -733,12 +774,11 @@
           });
         }
 
-        // --- Módulo: Scanner ---
+        // --- Scanner ---
         renderScanner(container) {
           container.innerHTML = `
                     <div class="max-w-3xl mx-auto mt-4">
                         <div class="bg-white rounded-3xl shadow-xl border border-slate-200 overflow-hidden">
-                            <!-- Header Mode Selection -->
                             <div class="flex border-b border-slate-100">
                                 <button onclick="app.setScanMode('in')" class="flex-1 py-6 flex flex-col items-center justify-center gap-2 transition-colors ${this.scanMode === "in" ? "bg-emerald-50 text-emerald-700 border-b-4 border-emerald-500" : "text-slate-400 hover:bg-slate-50"}">
                                     <i data-lucide="package-plus" class="w-8 h-8"></i>
@@ -762,17 +802,21 @@
                                             placeholder="Aguardando leitura..."
                                         >
                                     </form>
-                                    <p class="mt-4 text-sm text-slate-400 font-medium">O cursor foca automaticamente. Apenas aponte e dispare.</p>
+                                    <div class="mt-6 flex justify-center gap-3">
+                                        <button onclick="app.openCameraScanner()" class="flex items-center gap-2 bg-slate-800 text-white px-5 py-2.5 rounded-xl font-medium shadow-lg hover:bg-slate-700 transition-all active:scale-95">
+                                            <i data-lucide="camera" class="w-4 h-4"></i>
+                                            Usar Câmera
+                                        </button>
+                                    </div>
+                                    <p class="mt-4 text-sm text-slate-400 font-medium">Use um leitor USB ou a câmera do celular.</p>
                                 </div>
                             </div>
 
-                            <!-- Área de Feedback -->
                             <div id="scan-feedback" class="p-6 min-h-[160px] flex items-center justify-center bg-white border-t border-slate-100">
                                 <p class="text-slate-400 italic">O último item processado aparecerá aqui.</p>
                             </div>
                         </div>
 
-                        <!-- Botão de Teste -->
                         <div class="text-center mt-8">
                             <button onclick="app.simulateScan()" class="text-slate-400 hover:text-primary text-sm font-medium underline decoration-dashed underline-offset-4 transition-colors">
                                 Sem leitor? Simular leitura aleatória
@@ -780,7 +824,6 @@
                         </div>
                     </div>
                 `;
-
           setTimeout(() => this.focusScanner(), 100);
         }
 
@@ -794,8 +837,15 @@
           if (input) {
             input.focus();
             input.onblur = () => {
-              if (this.activeTab === "scanner")
+              if (
+                this.activeTab === "scanner" &&
+                !document
+                  .getElementById("modal-camera")
+                  .classList.contains("flex")
+              ) {
+                // Só refoca se a câmera não estiver aberta
                 setTimeout(() => input.focus(), 500);
+              }
             };
           }
         }
@@ -810,7 +860,6 @@
           const feedbackEl = document.getElementById("scan-feedback");
 
           if (item) {
-            // Lógica de Movimentação
             if (this.scanMode === "in") {
               item.quantity++;
               this.logTransaction("entrada", item.name, 1, item.barcode);
@@ -838,7 +887,6 @@
             }
             this.saveData();
           } else {
-            // Não encontrado
             this.showToast(`Código ${code} desconhecido`, "error");
             feedbackEl.innerHTML = `
                         <div class="text-center">
@@ -853,7 +901,6 @@
                         </div>
                     `;
           }
-
           input.value = "";
         }
 
@@ -887,7 +934,69 @@
           }
         }
 
-        // --- Módulo: Inventário ---
+        // --- Lógica da Câmera ---
+        openCameraScanner() {
+          this.cameraTargetInput = document.getElementById("scannerInput");
+          this.startCamera();
+        }
+
+        openCameraForInput() {
+          this.cameraTargetInput = document.getElementById("new-barcode");
+          this.startCamera();
+        }
+
+        startCamera() {
+          const modal = document.getElementById("modal-camera");
+          modal.classList.remove("hidden");
+          modal.classList.add("flex");
+
+          if (!this.html5QrcodeScanner) {
+            this.html5QrcodeScanner = new Html5Qrcode("reader");
+          }
+
+          const config = { fps: 10, qrbox: { width: 250, height: 250 } };
+
+          this.html5QrcodeScanner
+            .start(
+              { facingMode: "environment" },
+              config,
+              (decodedText) => {
+                this.stopCamera();
+                if (this.cameraTargetInput) {
+                  this.cameraTargetInput.value = decodedText;
+
+                  // Se for o scanner principal, submete automaticamente
+                  if (this.cameraTargetInput.id === "scannerInput") {
+                    this.handleScanSubmit({ preventDefault: () => {} });
+                  }
+                }
+              },
+              (errorMessage) => {
+                // ignorar erros de leitura contínua
+              },
+            )
+            .catch((err) => {
+              alert("Erro ao iniciar câmera: " + err);
+              this.stopCamera();
+            });
+        }
+
+        stopCamera() {
+          const modal = document.getElementById("modal-camera");
+          modal.classList.add("hidden");
+          modal.classList.remove("flex");
+
+          if (this.html5QrcodeScanner && this.html5QrcodeScanner.isScanning) {
+            this.html5QrcodeScanner
+              .stop()
+              .then(() => {
+                // Câmera parada
+              })
+              .catch((err) => console.log(err));
+          }
+        }
+
+        // --- Inventário ---
         renderInventory(container) {
           const filtered = this.inventory.filter(
             (item) =>
@@ -900,7 +1009,6 @@
 
           container.innerHTML = `
                     <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden flex flex-col h-[calc(100vh-140px)] md:h-auto">
-                        <!-- Toolbar -->
                         <div class="p-4 md:p-6 border-b border-slate-100 flex flex-col md:flex-row gap-4 justify-between items-center bg-white sticky top-0 z-10">
                             <div class="relative w-full md:w-96">
                                 <i data-lucide="search" class="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400"></i>
@@ -916,8 +1024,6 @@
                                 Novo Produto
                             </button>
                         </div>
-
-                        <!-- Table -->
                         <div class="overflow-auto custom-scroll flex-1">
                             <table class="w-full text-left border-collapse">
                                 <thead class="bg-slate-50 sticky top-0 z-0">
@@ -1002,7 +1108,6 @@
         }
 
         // --- Lógica de CRUD (Criar, Editar, Excluir) ---
-
         toggleModal(show) {
           const modal = document.getElementById("modal-add");
           const content = document.getElementById("modal-content");
@@ -1011,7 +1116,6 @@
           if (show) {
             modal.classList.remove("hidden");
             modal.classList.add("flex");
-            // Animate In
             setTimeout(() => {
               content.classList.remove("scale-95", "opacity-0");
               content.classList.add("scale-100", "opacity-100");
@@ -1023,7 +1127,6 @@
               modal.classList.add("hidden");
               modal.classList.remove("flex");
               form.reset();
-              // Resetar estado de edição
               this.editingId = null;
               document.getElementById("modal-title").textContent =
                 "Novo Produto";
@@ -1073,12 +1176,10 @@
           );
 
           if (this.editingId) {
-            // --- MODO EDIÇÃO ---
             const index = this.inventory.findIndex(
               (i) => i.id === this.editingId,
             );
             if (index > -1) {
-              // Verifica se o barcode já existe em OUTRO produto
               if (
                 this.inventory.some(
                   (i) => i.barcode === barcode && i.id !== this.editingId,
@@ -1092,8 +1193,6 @@
               }
 
               const oldQty = this.inventory[index].quantity;
-
-              // Atualiza o objeto
               this.inventory[index] = {
                 ...this.inventory[index],
                 barcode,
@@ -1103,18 +1202,13 @@
                 quantity,
                 minStock,
               };
-
-              // Loga ajuste manual se a quantidade mudou
               if (oldQty !== quantity) {
                 const diff = quantity - oldQty;
-                const action = "ajuste";
-                this.logTransaction(action, name, Math.abs(diff), barcode);
+                this.logTransaction("ajuste", name, Math.abs(diff), barcode);
               }
-
               this.showToast("Produto atualizado com sucesso!", "success");
             }
           } else {
-            // --- MODO CRIAÇÃO ---
             if (this.inventory.some((i) => i.barcode === barcode)) {
               this.showToast("Este código de barras já existe!", "error");
               return;
@@ -1129,7 +1223,6 @@
               quantity,
               minStock,
             };
-
             this.inventory.push(newItem);
             this.logTransaction(
               "novo",
@@ -1146,7 +1239,6 @@
           if (this.activeTab === "inventory") {
             this.render();
           } else if (this.activeTab === "scanner" && !this.editingId) {
-            // Se estava no scanner e criou um novo, volta pro modo in
             this.setScanMode("in");
           }
         }
@@ -1169,7 +1261,6 @@
           }
         }
 
-        // --- Utilitários ---
         logTransaction(action, itemName, quantity, barcode) {
           this.logs.unshift({
             id: Date.now(),
@@ -1189,28 +1280,23 @@
         showToast(message, type = "success") {
           const container = document.getElementById("toast-container");
           const toast = document.createElement("div");
-
           const styles = {
             success: "bg-emerald-600 text-white",
             error: "bg-red-600 text-white",
             warning: "bg-amber-500 text-white",
           };
-
           const icons = {
             success: "check-circle",
             error: "alert-circle",
             warning: "alert-triangle",
           };
-
           toast.className = `${styles[type]} px-6 py-4 rounded-xl shadow-xl flex items-center gap-3 min-w-[300px] toast-enter pointer-events-auto`;
           toast.innerHTML = `
                     <i data-lucide="${icons[type]}" class="w-5 h-5"></i>
                     <span class="font-medium">${message}</span>
                 `;
-
           container.appendChild(toast);
           lucide.createIcons();
-
           setTimeout(() => {
             toast.style.opacity = "0";
             toast.style.transform = "translateY(-10px)";
@@ -1229,12 +1315,10 @@
         exportCSV() {
           let csvContent = "data:text/csv;charset=utf-8,";
           csvContent += "ID,Nome,Codigo,Categoria,Preco,Estoque,Minimo\n";
-
           this.inventory.forEach((item) => {
             const row = `${item.id},"${item.name}",${item.barcode},${item.category},${item.price},${item.quantity},${item.minStock}`;
             csvContent += row + "\n";
           });
-
           const encodedUri = encodeURI(csvContent);
           const link = document.createElement("a");
           link.setAttribute("href", encodedUri);
@@ -1245,12 +1329,9 @@
         }
       }
 
-      // Inicializar App Globalmente
       const app = new StockSystem();
       document.addEventListener("DOMContentLoaded", () => {
         app.init();
-
-        // Listener para Form de Adição/Edição (Global)
         document
           .getElementById("form-add")
           .addEventListener("submit", app.handleSaveItem);
