@@ -985,45 +985,93 @@
             });
           }
 
-          // FIX: O primeiro argumento deve ter APENAS UMA chave (deviceId ou facingMode)
-          const cameraIdOrConfig = { facingMode: "environment" };
-
+          // Configuração da câmera
           const config = {
             fps: 25,
             qrbox: { width: 280, height: 100 },
             aspectRatio: 1.0,
             disableFlip: false,
-            // Adicionando constraints aqui para tentar forçar HD, se suportado pelo navegador
+            // Video constraints padrão, se não encontrar ID
             videoConstraints: {
+              facingMode: "environment",
               width: { min: 640, ideal: 1280, max: 1920 },
               height: { min: 480, ideal: 720, max: 1080 },
             },
           };
 
-          this.html5QrcodeScanner
-            .start(
-              cameraIdOrConfig,
-              config,
-              (decodedText) => {
-                this.stopCamera();
-                this.playBeep();
+          // Lógica robusta para encontrar câmera traseira
+          Html5Qrcode.getCameras()
+            .then((devices) => {
+              if (devices && devices.length) {
+                let cameraId = devices[0].id;
 
-                if (this.cameraTargetInput) {
-                  this.cameraTargetInput.value = decodedText;
-                  if (this.cameraTargetInput.id === "scannerInput") {
-                    this.handleScanSubmit({ preventDefault: () => {} });
-                  } else {
-                    document.getElementById("new-name")?.focus();
-                  }
+                // 1. Tenta achar pela label (back/traseira)
+                const backCamera = devices.find(
+                  (d) =>
+                    d.label.toLowerCase().includes("back") ||
+                    d.label.toLowerCase().includes("traseira") ||
+                    d.label.toLowerCase().includes("environment"),
+                );
+
+                if (backCamera) {
+                  cameraId = backCamera.id;
+                } else if (devices.length > 1) {
+                  // 2. Se não achar pelo nome, pega a última (comum em Android)
+                  cameraId = devices[devices.length - 1].id;
                 }
-              },
-              (errorMessage) => {},
-            )
+
+                // Inicia com o ID específico
+                return this.html5QrcodeScanner.start(
+                  cameraId,
+                  config,
+                  (decodedText) => this.onScanSuccess(decodedText),
+                  (errorMessage) => {
+                    /* ignore */
+                  },
+                );
+              } else {
+                // Fallback: Tenta deixar o browser escolher
+                return this.html5QrcodeScanner.start(
+                  { facingMode: "environment" },
+                  config,
+                  (decodedText) => this.onScanSuccess(decodedText),
+                  (errorMessage) => {
+                    /* ignore */
+                  },
+                );
+              }
+            })
             .catch((err) => {
-              console.error(err);
-              alert("Erro ao iniciar câmera: " + err);
-              this.stopCamera();
+              // Se falhar ao listar, tenta iniciar direto com constraint
+              this.html5QrcodeScanner
+                .start(
+                  { facingMode: "environment" },
+                  config,
+                  (decodedText) => this.onScanSuccess(decodedText),
+                  (errorMessage) => {
+                    /* ignore */
+                  },
+                )
+                .catch((finalErr) => {
+                  console.error(finalErr);
+                  alert("Erro ao iniciar câmera: " + finalErr);
+                  this.stopCamera();
+                });
             });
+        }
+
+        onScanSuccess(decodedText) {
+          this.stopCamera();
+          this.playBeep();
+
+          if (this.cameraTargetInput) {
+            this.cameraTargetInput.value = decodedText;
+            if (this.cameraTargetInput.id === "scannerInput") {
+              this.handleScanSubmit({ preventDefault: () => {} });
+            } else {
+              document.getElementById("new-name")?.focus();
+            }
+          }
         }
 
         stopCamera() {
