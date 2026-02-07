@@ -270,20 +270,28 @@
           class="p-4 bg-black flex-1 flex items-center justify-center relative overflow-hidden"
         >
           <div id="reader" class="w-full h-full"></div>
-          <!-- Overlay de mira -->
+          <!-- Overlay de mira Otimizado para Barras -->
           <div
-            class="absolute inset-0 pointer-events-none border-2 border-primary/50 opacity-50 rounded-lg m-12"
-          ></div>
+            class="absolute inset-0 pointer-events-none flex items-center justify-center"
+          >
+            <!-- Caixa mais larga e mais baixa para focar em códigos de barras -->
+            <div
+              class="w-[85%] h-[120px] border-2 border-primary/50 opacity-70 rounded-lg"
+            ></div>
+          </div>
           <div
             class="absolute inset-0 pointer-events-none flex items-center justify-center"
           >
             <div
-              class="w-64 h-1 bg-red-500/50 shadow-[0_0_10px_rgba(239,68,68,0.8)]"
+              class="w-[80%] h-0.5 bg-red-500/80 shadow-[0_0_10px_rgba(239,68,68,0.8)] animate-pulse"
             ></div>
           </div>
         </div>
-        <div class="p-4 bg-slate-50 text-center text-xs text-slate-500">
-          Aponte a câmera para um código de barras ou QR Code.
+        <div
+          class="p-4 bg-slate-50 text-center text-xs text-slate-500 font-medium"
+        >
+          Alinhe o código de barras dentro do retângulo.
+          <br />Garanta boa iluminação.
         </div>
       </div>
     </div>
@@ -959,10 +967,10 @@
 
           if (!this.html5QrcodeScanner) {
             const formatsToSupport = [
-              Html5QrcodeSupportedFormats.QR_CODE,
               Html5QrcodeSupportedFormats.EAN_13,
               Html5QrcodeSupportedFormats.EAN_8,
               Html5QrcodeSupportedFormats.CODE_128,
+              Html5QrcodeSupportedFormats.QR_CODE,
               Html5QrcodeSupportedFormats.CODE_39,
               Html5QrcodeSupportedFormats.UPC_A,
               Html5QrcodeSupportedFormats.UPC_E,
@@ -973,19 +981,26 @@
             this.html5QrcodeScanner = new Html5Qrcode("reader", {
               formatsToSupport: formatsToSupport,
               verbose: false,
+              useBarCodeDetectorIfSupported: true,
             });
           }
 
+          const constraints = {
+            facingMode: "environment",
+            width: { min: 640, ideal: 1280, max: 1920 },
+            height: { min: 480, ideal: 720, max: 1080 },
+          };
+
           const config = {
-            fps: 15,
-            qrbox: { width: 280, height: 180 },
+            fps: 25,
+            qrbox: { width: 280, height: 100 },
             aspectRatio: 1.0,
             disableFlip: false,
           };
 
           this.html5QrcodeScanner
             .start(
-              { facingMode: "environment" },
+              constraints,
               config,
               (decodedText) => {
                 this.stopCamera();
@@ -1004,9 +1019,7 @@
             )
             .catch((err) => {
               console.error(err);
-              alert(
-                "Erro ao acessar câmera. Verifique se deu permissão e se está usando HTTPS.",
-              );
+              alert("Erro ao iniciar câmera: " + err);
               this.stopCamera();
             });
         }
